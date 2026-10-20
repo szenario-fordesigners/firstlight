@@ -83,8 +83,12 @@ php craft queue/listen --verbose
 
 ```twig
 {% set poster = video.poster.eagerly().one() %}
-<video controls preload="none" src="{{ video.url }}"
-  {% if poster %}poster="{{ poster.getUrl({ width: 1280, format: 'webp' }) }}"{% endif %}></video>
+<video
+  controls
+  preload="none"
+  src="{{ video.url }}"
+  {% if poster %}poster="{{ poster.getUrl({ width: 1280, format: 'webp' }) }}"{% endif %}>
+</video>
 ```
 
 ## Configuration 🛠️
