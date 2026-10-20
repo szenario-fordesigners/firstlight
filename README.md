@@ -82,7 +82,7 @@ php craft queue/listen --verbose
 5. Use the poster in your templates:
 
 ```twig
-{% set poster = video.poster.one() %}
+{% set poster = video.poster.eagerly().one() %}
 <video controls preload="none" src="{{ video.url }}"
   {% if poster %}poster="{{ poster.getUrl({ width: 1280, format: 'webp' }) }}"{% endif %}></video>
 ```
@@ -99,17 +99,9 @@ All settings can be overridden in `config/firstlight.php`.
 
 ## Templates
 
-The poster is a related asset, so templates use stock Craft. On listing pages, eager-load it with `.with(['poster'])`.
+The poster is a related asset, so templates use stock Craft. `.eagerly()` loads the posters for a whole list of videos in one query, so the same code works on single and listing pages.
 
-The `poster` attribute takes a single URL, so the browser can't pick a format. WebP works in every current browser, which makes it the safe default. To serve AVIF where it works, render the poster as a `<picture>` instead, for example as a click-to-play placeholder:
-
-```twig
-<picture>
-  <source type="image/avif" srcset="{{ poster.getSrcset([640, 1280, 1920], { format: 'avif' }) }}">
-  <source type="image/webp" srcset="{{ poster.getSrcset([640, 1280, 1920], { format: 'webp' }) }}">
-  <img src="{{ poster.getUrl({ width: 1280, format: 'jpg' }) }}" alt="" width="{{ poster.width }}" height="{{ poster.height }}">
-</picture>
-```
+The `poster` attribute takes a single URL, so the browser can't pick a format. WebP works in every current browser, which makes it the safe default. Want AVIF on top? Lay a `<picture>` over the player and hide it on play. That needs a few lines of JavaScript, and saves only a few KB per poster.
 
 ## Console Commands
 
