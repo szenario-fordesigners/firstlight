@@ -1,0 +1,64 @@
+{# @var plugin \szenario\craftfirstlight\FirstLight #}
+{# @var settings \szenario\craftfirstlight\models\Settings #}
+
+{% import '_includes/forms.twig' as forms %}
+
+<h2>{{ 'Status'|t('firstlight') }}</h2>
+<table class="data fullwidth">
+  <tbody>
+    {% for row in status %}
+      {% set state = row.ok ? 'ok' : row.level %}
+      <tr>
+        <td class="thin">
+          {% if state == 'ok' %}
+            <span class="status green" title="{{ 'OK'|t('firstlight') }}"></span>
+          {% elseif state == 'error' %}
+            <span class="status red" title="{{ 'Error'|t('firstlight') }}"></span>
+          {% elseif state == 'warning' %}
+            <span class="status orange" title="{{ 'Warning'|t('firstlight') }}"></span>
+          {% else %}
+            <span class="status" title="{{ 'Info'|t('firstlight') }}"></span>
+          {% endif %}
+        </td>
+        <th scope="row" class="thin nowrap">{{ row.label }}</th>
+        <td>{{ row.detail }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<hr>
+
+{{ forms.autosuggestField({
+  label: 'ffmpeg path'|t('firstlight'),
+  instructions: 'Path to the ffmpeg binary. ffprobe must sit next to it. Can be an environment variable like `$FFMPEG_PATH`.'|t('firstlight'),
+  id: 'ffmpegPath',
+  name: 'ffmpegPath',
+  value: settings.ffmpegPath,
+  suggestEnvVars: true,
+  required: true,
+  errors: settings.getErrors('ffmpegPath'),
+}) }}
+
+{{ forms.selectField({
+  label: 'Poster field'|t('firstlight'),
+  instructions: 'The Assets field that holds each video’s poster. Add it to every video volume’s field layout.'|t('firstlight'),
+  id: 'posterFieldUid',
+  name: 'posterFieldUid',
+  value: settings.posterFieldUid,
+  options: [{ label: '', value: '' }]|merge(fieldOptions),
+}) }}
+
+{{ forms.selectField({
+  label: 'Poster frame'|t('firstlight'),
+  instructions: 'Which frame of the video becomes its poster. Representative skips fade-ins and picks a typical frame. First frame matches what autoplaying videos show when they start.'|t('firstlight'),
+  id: 'posterFrame',
+  name: 'posterFrame',
+  value: settings.posterFrame,
+  options: [
+    { label: 'Representative frame'|t('firstlight'), value: constant('szenario\\craftfirstlight\\models\\Settings::POSTER_FRAME_REPRESENTATIVE') },
+    { label: 'First frame'|t('firstlight'), value: constant('szenario\\craftfirstlight\\models\\Settings::POSTER_FRAME_FIRST') },
+  ],
+  tip: 'Changing this only affects new posters. To update existing ones, select the videos and run “Regenerate poster”, or run `craft firstlight/posters/generate --force` (this also replaces posters editors picked).'|t('firstlight'),
+  errors: settings.getErrors('posterFrame'),
+}) }}
