@@ -15,11 +15,13 @@ use craft\events\PluginEvent;
 use craft\events\RegisterElementActionsEvent;
 use craft\events\RegisterElementSourcesEvent;
 use craft\events\ReplaceAssetEvent;
+use craft\events\TemplateEvent;
 use craft\fields\Assets as AssetsField;
 use craft\services\Assets;
 use craft\services\Elements;
 use craft\services\ElementSources;
 use craft\services\Plugins;
+use craft\web\View;
 use szenario\craftfirstlight\elements\actions\RegeneratePoster;
 use szenario\craftfirstlight\models\Settings;
 use szenario\craftfirstlight\services\Posters;
@@ -39,6 +41,32 @@ use yii\base\Event;
  */
 class FirstLight extends Plugin
 {
+    // Constants
+    // =========================================================================
+
+    /**
+     * Play badge over video poster thumbs, keyed off the data-kind attribute Craft puts on asset
+     * chips and cards. Only when the thumb is an image: videos without a poster show the file-type
+     * icon, which already says "video". Child selectors keep it off chips nested inside a video's
+     * card (e.g. the Poster field preview).
+     */
+    private const PLAY_BADGE_CSS = <<<'CSS'
+        .chip[data-kind="video"] > .thumb:has(img),
+        .card[data-kind="video"] > .card-main > .thumb:has(img) { position: relative; }
+        .chip[data-kind="video"] > .thumb:has(img)::after,
+        .card[data-kind="video"] > .card-main > .thumb:has(img)::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            margin: auto;
+            width: clamp(12px, 40%, 32px);
+            aspect-ratio: 1;
+            border-radius: 50%;
+            background: rgb(0 0 0 / .6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' stroke='white' stroke-width='2' stroke-linejoin='round' d='M9.5 7.5v9l7.5-4.5z'/%3E%3C/svg%3E") center / 100% no-repeat;
+            pointer-events: none;
+        }
+        CSS;
+
     // Public Properties
     // =========================================================================
 
@@ -216,6 +244,13 @@ class FirstLight extends Plugin
                 'action' => 'firstlight/posters/regenerate',
                 'params' => ['elementId' => $asset->id],
             ];
+        });
+
+        // Badge video poster thumbs with a play icon
+        Event::on(View::class, View::EVENT_BEFORE_RENDER_PAGE_TEMPLATE, function(TemplateEvent $event) {
+            if ($event->templateMode === View::TEMPLATE_MODE_CP) {
+                Craft::$app->getView()->registerCss(self::PLAY_BADGE_CSS);
+            }
         });
 
         // Show the poster as the video's CP thumbnail
