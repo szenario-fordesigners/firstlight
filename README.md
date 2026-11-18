@@ -25,6 +25,7 @@
 - Posters are normal image assets, so Craft transforms output AVIF, WebP and any size you need
 - Smart frame choice that skips black fade-ins, or the first frame to match autoplaying videos
 - HDR tone mapping, so iPhone clips don't come out washed out
+- Video width and height saved on the asset (`video.width`, `video.height`), with phone rotation applied, so you can reserve space and avoid layout shift
 - Editors can swap the poster for any library image, or bring the generated one back with **Regenerate poster**
 - Status panel and CLI check that tell you whether the server can actually make posters
 - CLI commands for filling in posters for existing videos
@@ -67,7 +68,7 @@ Installing creates a hidden **firstlight posters** volume at `@webroot/firstligh
 php craft firstlight/posters/status
 ```
 
-3. Fill in posters for videos uploaded before the plugin was installed:
+3. Fill in posters and dimensions for videos uploaded before the plugin was installed:
 
 ```bash
 php craft firstlight/posters/generate
@@ -87,6 +88,8 @@ php craft queue/listen --verbose
   controls
   preload="none"
   src="{{ video.url }}"
+  width="{{ video.width }}"
+  height="{{ video.height }}"
   {% if poster %}poster="{{ poster.getUrl({ width: 1280, format: 'webp' }) }}"{% endif %}>
 </video>
 ```
@@ -115,7 +118,7 @@ firstlight includes CLI commands for batch operations and deploy checks:
 # show available commands
 php craft help firstlight/posters
 
-# generate posters for videos that have none yet
+# generate posters for videos that have none yet, and save missing dimensions
 php craft firstlight/posters/generate
 
 # regenerate every video's poster (replaces posters editors picked)

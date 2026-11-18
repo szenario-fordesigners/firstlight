@@ -176,7 +176,7 @@ class FirstLight extends Plugin
             }
         });
 
-        // Generate a poster when a video is saved without one
+        // Generate a poster and read the dimensions when a video is saved without them
         Event::on(Asset::class, Element::EVENT_AFTER_SAVE, function(ModelEvent $event) {
             /** @var Asset $asset */
             $asset = $event->sender;
@@ -185,17 +185,21 @@ class FirstLight extends Plugin
             }
 
             $posters = $this->getPosters();
-            if ($posters->needsPoster($asset)) {
+            if ($posters->needsPoster($asset) || $posters->needsDimensions($asset)) {
                 $posters->queue($asset);
             }
         });
 
-        // Regenerate the generated poster in place when the video file is replaced
+        // Re-measure the video when its file is replaced, and regenerate the generated poster in place.
+        // A video that needs a poster was queued by the save above, and extracting measures it too.
         Event::on(Assets::class, Assets::EVENT_AFTER_REPLACE_ASSET, function(ReplaceAssetEvent $event) {
             $posters = $this->getPosters();
-            if ($posters->isVideo($event->asset) && $posters->getGeneratedPoster($event->asset)) {
-                $posters->queue($event->asset, force: true, link: false);
+            if (!$posters->isVideo($event->asset) || $posters->needsPoster($event->asset)) {
+                return;
             }
+
+            $generated = $posters->getGeneratedPoster($event->asset) !== null;
+            $posters->queue($event->asset, force: $generated, link: false);
         });
 
         // The generated poster follows its video into the trash, out of it, and out for good

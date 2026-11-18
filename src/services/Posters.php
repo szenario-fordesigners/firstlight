@@ -6,11 +6,13 @@ use Craft;
 use craft\base\Component;
 use craft\base\Field;
 use craft\db\QueryAbortedException;
+use craft\db\Table;
 use craft\elements\Asset;
 use craft\elements\User;
 use craft\errors\FsException;
 use craft\fields\Assets as AssetsField;
 use craft\fs\Local;
+use craft\helpers\Db;
 use craft\helpers\FileHelper;
 use craft\helpers\Json;
 use craft\helpers\Queue;
@@ -228,6 +230,20 @@ class Posters extends Component
     }
 
     /**
+     * Returns whether a video is missing its width or height.
+     *
+     * @param Asset $video
+     * @return bool
+     *
+     * @author szenario
+     * @since 1.2.0
+     */
+    public function needsDimensions(Asset $video): bool
+    {
+        return $this->isVideo($video) && (!$video->getWidth() || !$video->getHeight());
+    }
+
+    /**
      * Returns whether the user may regenerate the video's poster.
      *
      * @param Asset $asset
@@ -262,8 +278,33 @@ class Posters extends Component
     }
 
     /**
+     * Reads the video's display width and height with ffprobe and saves them on the asset.
+     *
+     * @param Asset $video
+     * @throws Exception if ffprobe can't read the dimensions
+     *
+     * @author szenario
+     * @since 1.2.0
+     */
+    public function measure(Asset $video): void
+    {
+        // ponytail: copies local files too; probe the volume path directly if big local libraries make this slow
+        $tempVideo = $video->getCopyOfFile();
+
+        try {
+            $stream = $this->_probe($tempVideo);
+        } finally {
+            FileHelper::unlink($tempVideo);
+        }
+
+        if (!$this->_saveDimensions($video, $stream)) {
+            throw new Exception("ffprobe couldn't read the dimensions of video $video->id.");
+        }
+    }
+
+    /**
      * Extracts a poster frame from the video and saves it as `{videoUid}.png` in the sidecar volume,
-     * replacing the file in place if the poster exists already.
+     * replacing the file in place if the poster exists already. Saves the video's dimensions along the way.
      *
      * @param Asset $video
      * @param bool $link Whether to link the poster in the video's poster field
@@ -285,7 +326,11 @@ class Posters extends Component
         $tempPng = Craft::$app->getPath()->getTempPath() . DIRECTORY_SEPARATOR . 'firstlight-' . $video->uid . '-' . uniqid() . '.png';
 
         try {
-            $this->_extractFrame($tempVideo, $tempPng);
+            $stream = $this->_probe($tempVideo);
+            // Before linking, since that save writes the asset's in-memory dimensions back to the record.
+            $this->_saveDimensions($video, $stream);
+            $hdr = in_array($stream['color_transfer'] ?? null, ['smpte2084', 'arib-std-b67'], true);
+            $this->_extractFrame($tempVideo, $tempPng, $hdr);
             $poster = $this->_savePoster($video, $volume, $tempPng);
         } finally {
             FileHelper::unlink($tempVideo);
@@ -523,18 +568,19 @@ class Posters extends Component
      *
      * @param string $videoPath
      * @param string $pngPath
+     * @param bool $hdr Whether the video uses an HDR transfer and needs tone mapping
      * @throws Exception if no frame comes out
      *
      * @author szenario
      * @since 1.0.0
      */
-    private function _extractFrame(string $videoPath, string $pngPath): void
+    private function _extractFrame(string $videoPath, string $pngPath, bool $hdr): void
     {
         $max = self::MAX_SHORT_SIDE;
         $size = "w='if(gte(iw,ih),-2,min(iw,$max))':h='if(gte(iw,ih),min(ih,$max),-2)'";
         $filter = "scale=$size";
 
-        if ($this->_isHdr($videoPath)) {
+        if ($hdr) {
             if ($this->_hasToneMapping()) {
                 // Downscale in the first step, so the float conversion runs on the small frame (about half the memory at 4K).
                 $filter = "zscale=$size:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
@@ -640,34 +686,71 @@ class Posters extends Component
     }
 
     /**
-     * Returns whether the video's first stream uses an HDR transfer (HDR10 or HLG).
+     * Returns ffprobe's info on the video's first stream: `width`, `height`, `color_transfer`,
+     * and the rotation in `side_data_list` (or the `rotate` tag on older ffmpeg). Empty if ffprobe fails.
      *
      * @param string $videoPath
-     * @return bool
+     * @return array<string, mixed>
      *
      * @author szenario
-     * @since 1.0.0
+     * @since 1.2.0
      */
-    private function _isHdr(string $videoPath): bool
+    private function _probe(string $videoPath): array
     {
         $process = new Process([
             FirstLight::getInstance()->getSettings()->getFfprobePath(),
             '-v', 'error',
             '-select_streams', 'v:0',
-            '-show_entries', 'stream=color_transfer',
+            '-show_entries', 'stream=width,height,color_transfer:stream_side_data=rotation:stream_tags=rotate',
             '-of', 'json',
             $videoPath,
         ], timeout: 60);
         $process->run();
 
         if (!$process->isSuccessful()) {
-            Craft::warning("ffprobe failed, treating $videoPath as SDR: " . $process->getErrorOutput(), __METHOD__);
+            Craft::warning("ffprobe failed on $videoPath: " . $process->getErrorOutput(), __METHOD__);
+            return [];
+        }
+
+        return Json::decodeIfJson($process->getOutput())['streams'][0] ?? [];
+    }
+
+    /**
+     * Saves the probed width and height on the video, swapped for portrait videos stored sideways.
+     *
+     * Writes the assets table directly, so no save events fire and no new job gets queued.
+     *
+     * @param Asset $video
+     * @param array<string, mixed> $stream From `_probe()`
+     * @return bool Whether the stream had dimensions
+     *
+     * @author szenario
+     * @since 1.2.0
+     */
+    private function _saveDimensions(Asset $video, array $stream): bool
+    {
+        $width = (int)($stream['width'] ?? 0);
+        $height = (int)($stream['height'] ?? 0);
+        if (!$width || !$height) {
             return false;
         }
 
-        $transfer = Json::decodeIfJson($process->getOutput())['streams'][0]['color_transfer'] ?? null;
+        // ponytail: ignores non-square pixels (anamorphic SD); multiply by sample_aspect_ratio if those turn up
+        $rotation = (int)($stream['side_data_list'][0]['rotation'] ?? $stream['tags']['rotate'] ?? 0);
+        if (abs($rotation) % 180 === 90) {
+            [$width, $height] = [$height, $width];
+        }
 
-        return in_array($transfer, ['smpte2084', 'arib-std-b67'], true);
+        if ($video->getWidth() === $width && $video->getHeight() === $height) {
+            return true;
+        }
+
+        $video->setWidth($width);
+        $video->setHeight($height);
+        Db::update(Table::ASSETS, ['width' => $width, 'height' => $height], ['id' => $video->id]);
+        Craft::$app->getElements()->invalidateCachesForElement($video);
+
+        return true;
     }
 
     /**

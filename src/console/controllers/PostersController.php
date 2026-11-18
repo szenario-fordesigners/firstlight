@@ -43,7 +43,7 @@ class PostersController extends Controller
     }
 
     /**
-     * Generates posters for videos that have none yet.
+     * Generates posters for videos that have none yet, and saves missing video dimensions.
      *
      * @return int
      *
@@ -58,16 +58,18 @@ class PostersController extends Controller
 
         foreach ($posters->eachVideo() as $video) {
             /** @var Asset $video */
-            if (!$posters->getPosterHandle($video)) {
-                continue;
-            }
-            if (!$this->force && !$posters->needsPoster($video)) {
+            $poster = $posters->getPosterHandle($video) && ($this->force || $posters->needsPoster($video));
+            if (!$poster && !$posters->needsDimensions($video)) {
                 continue;
             }
 
             $this->stdout("$video->filename ... ");
             try {
-                $posters->extract($video);
+                if ($poster) {
+                    $posters->extract($video);
+                } else {
+                    $posters->measure($video);
+                }
                 $done++;
                 $this->stdout("done\n", Console::FG_GREEN);
             } catch (Throwable $e) {
@@ -77,7 +79,7 @@ class PostersController extends Controller
             }
         }
 
-        $this->stdout("$done posters generated, $failed failed.\n");
+        $this->stdout("$done videos done, $failed failed.\n");
 
         return $failed ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
     }

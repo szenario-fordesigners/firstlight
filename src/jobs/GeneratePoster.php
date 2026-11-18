@@ -8,7 +8,7 @@ use craft\queue\BaseJob;
 use szenario\craftfirstlight\FirstLight;
 
 /**
- * Extracts a video's poster frame.
+ * Extracts a video's poster frame and saves its dimensions, or only the dimensions if it needs no poster.
  *
  * Not retryable: a corrupt or unsupported video fails the same way every time.
  * The next save of the video tries again.
@@ -51,8 +51,10 @@ class GeneratePoster extends BaseJob
 
         $posters = FirstLight::getInstance()->getPosters();
 
-        // The editor may have picked a poster since the job was queued.
+        // The editor may have picked a poster since the job was queued. The job is only
+        // queued when something needs doing, so measure the video at least.
         if (!$this->force && !$posters->needsPoster($video)) {
+            $posters->measure($video);
             return;
         }
 
