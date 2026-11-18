@@ -1,6 +1,6 @@
 # Release Notes for firstlight
 
-## Unreleased
+## 1.2.0 - 2026-11-18
 
 ### Added
 - Video assets now get their width and height saved, read with ffprobe in the same queue job that makes the poster. Rotated phone videos get their display dimensions. Videos without the Poster field are measured too.
